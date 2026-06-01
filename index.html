@@ -1,0 +1,738 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Teams Voice Dialer</title>
+  <link rel="manifest" href="./app.webmanifest" />
+  <meta name="theme-color" content="#0f6cbd" />
+
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f7fb;
+      margin: 0;
+      padding: 24px;
+      color: #1f2937;
+    }
+
+    .card {
+      max-width: 900px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+    }
+
+    h1 {
+      margin: 0 0 8px 0;
+      font-size: 32px;
+    }
+
+    .sub {
+      color: #4b5563;
+      margin-bottom: 18px;
+      line-height: 1.5;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+
+    button {
+      border: none;
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 15px;
+      cursor: pointer;
+      color: white;
+    }
+
+    .primary { background: #0f6cbd; }
+    .success { background: #107c10; }
+    .secondary { background: #6b7280; }
+    .warning { background: #b45309; }
+    .danger { background: #b91c1c; }
+
+    .status-box, .transcript-box, .results-box, .contacts-box {
+      background: #f9fafb;
+      border: 1px solid #e5e7eb;
+      border-radius: 12px;
+      padding: 14px;
+      margin-top: 14px;
+    }
+
+    .label {
+      font-size: 13px;
+      color: #6b7280;
+      margin-bottom: 6px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .value {
+      font-size: 16px;
+      white-space: pre-wrap;
+    }
+
+    .input-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 16px;
+    }
+
+    input[type="text"] {
+      flex: 1;
+      min-width: 260px;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid #cbd5e1;
+      font-size: 15px;
+    }
+
+    .result-item {
+      padding: 10px 0;
+      border-bottom: 1px solid #e5e7eb;
+      font-size: 16px;
+    }
+
+    .result-item:last-child {
+      border-bottom: none;
+    }
+
+    .pill-row {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    .pill {
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 13px;
+      background: #eef2ff;
+      color: #3730a3;
+    }
+
+    .pill.green {
+      background: #ecfdf5;
+      color: #166534;
+    }
+
+    .pill.orange {
+      background: #fff7ed;
+      color: #9a3412;
+    }
+
+    .muted {
+      color: #6b7280;
+      font-size: 14px;
+    }
+
+    .contacts-summary {
+      margin-top: 6px;
+      font-size: 15px;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    .mono {
+      font-family: Consolas, monospace;
+      background: #f3f4f6;
+      padding: 2px 6px;
+      border-radius: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Teams Voice Dialer</h1>
+    <div class="sub">
+      Load a private contacts file once, then say:
+      <b>“Call Name”</b> → if multiple matches appear, say
+      <b>“pick the second one”</b>, <b>“second”</b>, or <b>“2”</b>.
+    </div>
+
+    <div class="toolbar">
+      <button class="primary" onclick="triggerContactsFile()">📂 Load Contacts File</button>
+      <button class="danger" onclick="clearStoredContacts()">🗑 Clear Stored Contacts</button>
+      <button class="success" onclick="startVoiceMode()">▶ Start Voice Mode</button>
+      <button class="secondary" onclick="stopVoiceMode()">■ Stop Voice Mode</button>
+      <button class="primary" onclick="listenOnce()">🎤 Listen Once</button>
+      <button class="warning" onclick="checkMicSupport()">Check Mic</button>
+    </div>
+
+    <input
+      id="contactsFile"
+      type="file"
+      accept=".json,application/json"
+      class="hidden"
+    />
+
+    <div class="pill-row">
+      <div id="voiceModePill" class="pill orange">Voice Mode: OFF</div>
+      <div id="listeningPill" class="pill">Mic: Idle</div>
+      <div id="contactsPill" class="pill orange">Contacts: Not Loaded</div>
+    </div>
+
+    <div class="contacts-box">
+      <div class="label">Contacts Source</div>
+      <div id="contactsSummary" class="contacts-summary muted">
+        No contacts loaded yet. Click <b>Load Contacts File</b>.
+      </div>
+    </div>
+
+    <div class="status-box">
+      <div class="label">Status</div>
+      <div id="status" class="value">Ready</div>
+    </div>
+
+    <div class="transcript-box">
+      <div class="label">Last Heard</div>
+      <div id="lastHeard" class="value">Nothing yet</div>
+    </div>
+
+    <div class="input-row">
+      <input
+        id="command"
+        type="text"
+        placeholder='Type manually: "Call Name" or "2"'
+      />
+      <button class="primary" onclick="runManualCommand()">Run</button>
+    </div>
+
+    <div class="results-box">
+      <div class="label">Matches</div>
+      <div id="results" class="value">No matches yet</div>
+    </div>
+
+    <div class="contacts-box">
+      <div class="label">Expected contacts file format</div>
+      <div class="value">
+        JSON array with objects like:
+        <br /><br />
+        <span class="mono">[{ "name": "Person Name", "email": "person@company.com" }]</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let people = [];
+    let suggestions = [];
+    let recognition = null;
+    let voiceMode = false;
+    let listening = false;
+    let shouldRestart = false;
+    let isSpeaking = false;
+
+    const CONTACTS_STORAGE_KEY = "teamsVoiceDialerContacts";
+
+    function setStatus(text) {
+      document.getElementById("status").innerText = text;
+    }
+
+    function setLastHeard(text) {
+      document.getElementById("lastHeard").innerText = text || "Nothing yet";
+    }
+
+    function updateModePills() {
+      const voiceModePill = document.getElementById("voiceModePill");
+      const listeningPill = document.getElementById("listeningPill");
+      const contactsPill = document.getElementById("contactsPill");
+
+      voiceModePill.innerText = `Voice Mode: ${voiceMode ? "ON" : "OFF"}`;
+      voiceModePill.className = `pill ${voiceMode ? "green" : "orange"}`;
+
+      listeningPill.innerText = `Mic: ${listening ? "Listening" : "Idle"}`;
+      listeningPill.className = `pill ${listening ? "green" : ""}`;
+
+      contactsPill.innerText = `Contacts: ${people.length > 0 ? people.length + " Loaded" : "Not Loaded"}`;
+      contactsPill.className = `pill ${people.length > 0 ? "green" : "orange"}`;
+    }
+
+    function updateContactsSummary(sourceText) {
+      const summary = document.getElementById("contactsSummary");
+
+      if (!people.length) {
+        summary.innerHTML = 'No contacts loaded yet. Click <b>Load Contacts File</b>.';
+        return;
+      }
+
+      summary.innerHTML = `
+        <b>${people.length}</b> contacts loaded.<br />
+        <span class="muted">${sourceText}</span>
+      `;
+    }
+
+    function renderSuggestions() {
+      const box = document.getElementById("results");
+
+      if (!suggestions.length) {
+        box.innerText = "No matches yet";
+        return;
+      }
+
+      box.innerHTML = suggestions
+        .map((p, i) => `<div class="result-item"><strong>${i + 1}.</strong> ${p.name}</div>`)
+        .join("");
+    }
+
+    function triggerContactsFile() {
+      document.getElementById("contactsFile").click();
+    }
+
+    function validateContacts(data) {
+      if (!Array.isArray(data)) {
+        throw new Error("Contacts file must contain a JSON array.");
+      }
+
+      const cleaned = data
+        .filter(item => item && typeof item === "object")
+        .map(item => ({
+          name: String(item.name || "").trim(),
+          email: String(item.email || "").trim()
+        }))
+        .filter(item => item.name && item.email);
+
+      if (!cleaned.length) {
+        throw new Error("No valid contacts found. Each entry needs name and email.");
+      }
+
+      return cleaned;
+    }
+
+    function saveContactsLocally(contacts) {
+      localStorage.setItem(CONTACTS_STORAGE_KEY, JSON.stringify(contacts));
+    }
+
+    function loadStoredContacts() {
+      try {
+        const raw = localStorage.getItem(CONTACTS_STORAGE_KEY);
+        if (!raw) return;
+
+        const parsed = JSON.parse(raw);
+        people = validateContacts(parsed);
+
+        updateContactsSummary("Loaded from this browser's local storage.");
+        updateModePills();
+        setStatus(`Loaded ${people.length} contacts from local storage.`);
+      } catch (e) {
+        console.error(e);
+        people = [];
+        updateContactsSummary();
+        updateModePills();
+      }
+    }
+
+    function clearStoredContacts() {
+      localStorage.removeItem(CONTACTS_STORAGE_KEY);
+      people = [];
+      suggestions = [];
+      renderSuggestions();
+      updateContactsSummary();
+      updateModePills();
+      setStatus("Stored contacts cleared from this browser.");
+    }
+
+    async function handleContactsFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      try {
+        const text = await file.text();
+        const parsed = JSON.parse(text);
+        const validated = validateContacts(parsed);
+
+        people = validated;
+        saveContactsLocally(validated);
+        updateContactsSummary(`Loaded from local file: ${file.name}`);
+        updateModePills();
+        setStatus(`Loaded ${people.length} contacts from ${file.name}.`);
+      } catch (e) {
+        setStatus(`Could not load contacts file: ${e.message}`);
+      } finally {
+        event.target.value = "";
+      }
+    }
+
+    function normalizeText(text) {
+      return (text || "")
+        .toLowerCase()
+        .trim()
+        .replace(/^call\s+/, "")
+        .replace(/^dial\s+/, "")
+        .replace(/^call the\s+/, "")
+        .replace(/^dial the\s+/, "")
+        .replace(/^please\s+/, "");
+    }
+
+    function findMatches(text) {
+      const t = normalizeText(text);
+      return people.filter(p => p.name.toLowerCase().includes(t));
+    }
+
+    function getSpokenNumber(text) {
+      const cleaned = (text || "").toLowerCase().trim();
+
+      const digitMatch = cleaned.match(/\b(\d{1,2})(?:st|nd|rd|th)?\b/);
+      if (digitMatch) {
+        return parseInt(digitMatch[1], 10);
+      }
+
+      const patterns = [
+        { regex: /\b(one|first)\b/, value: 1 },
+        { regex: /\b(two|second)\b/, value: 2 },
+        { regex: /\b(three|third)\b/, value: 3 },
+        { regex: /\b(four|fourth)\b/, value: 4 },
+        { regex: /\b(five|fifth)\b/, value: 5 },
+        { regex: /\b(six|sixth)\b/, value: 6 },
+        { regex: /\b(seven|seventh)\b/, value: 7 },
+        { regex: /\b(eight|eighth)\b/, value: 8 },
+        { regex: /\b(nine|ninth)\b/, value: 9 },
+        { regex: /\b(ten|tenth)\b/, value: 10 }
+      ];
+
+      for (const item of patterns) {
+        if (item.regex.test(cleaned)) {
+          return item.value;
+        }
+      }
+
+      return null;
+    }
+
+    function speak(text, restartAfter = true) {
+      if (!("speechSynthesis" in window)) {
+        if (restartAfter) queueRelisten();
+        return;
+      }
+
+      try {
+        window.speechSynthesis.cancel();
+        isSpeaking = true;
+
+        if (listening && recognition) {
+          try { recognition.stop(); } catch (_) {}
+        }
+
+        const utterance = new SpeechSynthesisUtterance(text);
+        utterance.lang = "en-US";
+        utterance.rate = 1;
+        utterance.pitch = 1;
+
+        utterance.onend = function () {
+          isSpeaking = false;
+          if (restartAfter && voiceMode) {
+            setTimeout(() => {
+              if (voiceMode && !listening) {
+                beginListening();
+              }
+            }, 500);
+          }
+        };
+
+        utterance.onerror = function () {
+          isSpeaking = false;
+          if (restartAfter && voiceMode) {
+            queueRelisten();
+          }
+        };
+
+        window.speechSynthesis.speak(utterance);
+      } catch (_) {
+        isSpeaking = false;
+        if (restartAfter && voiceMode) {
+          queueRelisten();
+        }
+      }
+    }
+
+    function speakOptions(matches) {
+      const spokenList = matches
+        .map((p, i) => `option ${i + 1}`)
+        .join(". ");
+
+      const message = `I found ${matches.length} people. ${spokenList}. Please say a number.`;
+      speak(message, true);
+    }
+
+    function callPerson(person) {
+      if (!person || !person.email) {
+        setStatus("Could not find a valid person to call.");
+        queueRelisten();
+        return;
+      }
+
+      const webUrl = `https://teams.microsoft.com/l/call/0/0?users=${encodeURIComponent(person.email)}`;
+      const desktopUrl = `msteams://teams.microsoft.com/l/call/0/0?users=${encodeURIComponent(person.email)}`;
+
+      setStatus(`Calling ${person.name}...`);
+      suggestions = [];
+      renderSuggestions();
+
+      // Try Teams desktop app first
+      try {
+        window.location.href = desktopUrl;
+      } catch (e) {
+        console.log("Desktop launch failed:", e);
+      }
+
+      // Fallback to Teams web link
+      setTimeout(() => {
+        const popup = window.open(webUrl, "_blank");
+        if (!popup) {
+          setStatus(`Calling ${person.name}...\nPopup blocked. Please allow popups and try again.`);
+        }
+      }, 1200);
+
+      queueRelisten();
+    }
+
+    function queueRelisten() {
+      if (!voiceMode) return;
+
+      setTimeout(() => {
+        if (!listening && voiceMode && !isSpeaking) {
+          beginListening();
+        }
+      }, 1800);
+    }
+
+    function processCommand(rawInput) {
+      if (!people.length) {
+        setStatus("Please load a contacts file first.");
+        return;
+      }
+
+      const text = (rawInput || "").trim();
+      if (!text) {
+        setStatus("Please say or type something.");
+        queueRelisten();
+        return;
+      }
+
+      setLastHeard(text);
+
+      if (suggestions.length > 0) {
+        const selectedNumber = getSpokenNumber(text);
+
+        console.log("Selection heard:", text, "Parsed number:", selectedNumber, "Suggestions:", suggestions);
+
+        if (selectedNumber !== null) {
+          const index = selectedNumber - 1;
+          const chosen = suggestions[index];
+
+          if (!chosen) {
+            setStatus(`Option ${selectedNumber} does not exist. Please say another number.`);
+            speak(`Option ${selectedNumber} does not exist. Please say another number.`, true);
+            return;
+          }
+
+          setStatus(`Selected option ${selectedNumber}: ${chosen.name}`);
+          callPerson(chosen);
+          return;
+        }
+
+        setStatus("I did not catch a number. Please say 1, 2, 3, or say second / third.");
+        speak("I did not catch a number. Please say 1, 2, 3, or say second or third.", true);
+        return;
+      }
+
+      const matches = findMatches(text);
+
+      if (matches.length === 0) {
+        suggestions = [];
+        renderSuggestions();
+        setStatus("No match found. Try saying another name.");
+        queueRelisten();
+        return;
+      }
+
+      if (matches.length === 1) {
+        callPerson(matches[0]);
+        return;
+      }
+
+      suggestions = matches;
+      renderSuggestions();
+      setStatus(`Found ${matches.length} people. Speaking options now...`);
+      speakOptions(matches);
+    }
+
+    function runManualCommand() {
+      const text = document.getElementById("command").value;
+      processCommand(text);
+    }
+
+    function getSpeechSupport() {
+      return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+    }
+
+    function checkMicSupport() {
+      const SpeechRecognition = getSpeechSupport();
+
+      if (!SpeechRecognition) {
+        setStatus("Speech recognition is not supported in this browser.");
+        return;
+      }
+
+      setStatus("Speech recognition is supported. You can start Voice Mode.");
+    }
+
+    function createRecognition() {
+      const SpeechRecognition = getSpeechSupport();
+
+      if (!SpeechRecognition) {
+        setStatus("Speech recognition is not supported in this browser.");
+        return null;
+      }
+
+      const rec = new SpeechRecognition();
+      rec.lang = "en-US";
+      rec.interimResults = false;
+      rec.continuous = false;
+      rec.maxAlternatives = 1;
+
+      rec.onstart = function () {
+        listening = true;
+        updateModePills();
+        setStatus("Listening...");
+      };
+
+      rec.onresult = function (event) {
+        const spokenText = event.results[0][0].transcript || "";
+        document.getElementById("command").value = spokenText;
+        setStatus(`Heard: ${spokenText}`);
+        processCommand(spokenText);
+      };
+
+      rec.onerror = function (event) {
+        listening = false;
+        updateModePills();
+
+        let msg = `Mic error: ${event.error}`;
+
+        if (event.error === "not-allowed") {
+          msg += "\nPlease allow microphone access in the browser.";
+          voiceMode = false;
+          shouldRestart = false;
+          updateModePills();
+        } else if (event.error === "no-speech") {
+          msg += "\nNo speech detected. Listening again...";
+          if (voiceMode) queueRelisten();
+        } else if (event.error === "audio-capture") {
+          msg += "\nNo microphone detected or microphone unavailable.";
+        }
+
+        setStatus(msg);
+      };
+
+      rec.onend = function () {
+        listening = false;
+        updateModePills();
+
+        if (voiceMode && shouldRestart && !isSpeaking) {
+          setTimeout(() => {
+            if (voiceMode && !listening && !isSpeaking) {
+              beginListening();
+            }
+          }, 700);
+        }
+      };
+
+      return rec;
+    }
+
+    function beginListening() {
+      if (!voiceMode && !shouldRestart) return;
+      if (listening) return;
+
+      recognition = createRecognition();
+      if (!recognition) return;
+
+      try {
+        recognition.start();
+      } catch (_) {
+        listening = false;
+        updateModePills();
+        setStatus("Could not start microphone. Try again.");
+      }
+    }
+
+    function listenOnce() {
+      voiceMode = false;
+      shouldRestart = false;
+      updateModePills();
+
+      if (listening && recognition) {
+        try { recognition.stop(); } catch (_) {}
+      }
+
+      const tempRecognition = createRecognition();
+      if (!tempRecognition) return;
+
+      tempRecognition.onend = function () {
+        listening = false;
+        updateModePills();
+      };
+
+      recognition = tempRecognition;
+
+      try {
+        recognition.start();
+      } catch (_) {
+        setStatus("Could not start one-time listening.");
+      }
+    }
+
+    function startVoiceMode() {
+      if (!people.length) {
+        setStatus("Please load a contacts file first.");
+        return;
+      }
+
+      voiceMode = true;
+      shouldRestart = true;
+      updateModePills();
+      setStatus("Voice Mode started. Listening...");
+      beginListening();
+    }
+
+    function stopVoiceMode() {
+      voiceMode = false;
+      shouldRestart = false;
+      listening = false;
+      updateModePills();
+      setStatus("Voice Mode stopped.");
+      window.speechSynthesis.cancel();
+
+      if (recognition) {
+        try { recognition.stop(); } catch (_) {}
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      document.getElementById("command").addEventListener("keydown", function (e) {
+        if (e.key === "Enter") {
+          runManualCommand();
+        }
+      });
+
+      document.getElementById("contactsFile").addEventListener("change", handleContactsFile);
+
+      loadStoredContacts();
+      updateModePills();
+      renderSuggestions();
+    });
+  </script>
+</body>
+</html>
