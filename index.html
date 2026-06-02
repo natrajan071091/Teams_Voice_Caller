@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Teams Voice Dialer - V8 Fast Fallback</title>
+  <style>
+    body { font-family: Arial, sans-serif; background:#f5f7fb; margin:0; padding:24px; color:#1f2937; }
+    .card { max-width:860px; margin:0 auto; background:#fff; border-radius:16px; padding:24px; box-shadow:0 8px 24px rgba(0,0,0,0.08); }
+    h1 { margin:0 0 8px 0; font-size:30px; }
+    .sub { color:#4b5563; margin-bottom:18px; line-height:1.5; }
+    .toolbar { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:16px; }
+    button, a.big-action { border:none; border-radius:12px; padding:12px 16px; font-size:15px; cursor:pointer; color:#fff; text-decoration:none; display:inline-flex; align-items:center; justify-content:center; }
+    .primary { background:#0f6cbd; }
+    .success { background:#107c10; }
+    .secondary { background:#6b7280; }
+    .danger { background:#b91c1c; }
+    .warning { background:#b45309; }
+    .box { background:#f9fafb; border:1px solid #e5e7eb; border-radius:12px; padding:14px; margin-top:14px; }
+    .label { font-size:13px; color:#6b7280; margin-bottom:6px; text-transform:uppercase; letter-spacing:0.04em; }
+    .value { font-size:16px; white-space:pre-wrap; }
+    .pill-row { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+    .pill { padding:6px 10px; border-radius:999px; font-size:13px; background:#eef2ff; color:#3730a3; }
+    .pill.green { background:#ecfdf5; color:#166534; }
+    .pill.orange { background:#fff7ed; color:#9a3412; }
+    .pill.red { background:#fef2f2; color:#991b1b; }
+    .muted { color:#6b7280; }
+    input[type='text'] { width:100%; padding:12px; border-radius:10px; border:1px solid #cbd5e1; box-sizing:border-box; font-size:15px; }
+    .call-panel { border:2px solid #0f6cbd; background:#eff6ff; }
+    .call-name { font-size:26px; font-weight:700; margin:8px 0; }
+    .call-email { font-size:14px; color:#4b5563; margin-bottom:12px; word-break:break-all; }
+    .big-action { width:100%; min-height:64px; font-size:22px; font-weight:700; background:#107c10; }
+    .hint { font-size:13px; color:#6b7280; margin-top:10px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Teams Voice Dialer - V8 Fast Fallback</h1>
+    <div class="sub">
+      Fast fallback version: say a name once, the app matches the person, then shows one <b>single large call button</b> as the fastest reliable action.
+      This avoids repeated browser protocol blocking while keeping the UI very simple.
+    </div>
+
+    <div class="toolbar">
+      <button class="primary" onclick="triggerContactsFile()">Load Contacts File</button>
+      <button class="danger" onclick="clearStoredContacts()">Clear Stored Contacts</button>
+      <button class="success" onclick="startVoiceMode()">Start Voice Mode</button>
+      <button class="secondary" onclick="stopVoiceMode()">Stop Voice Mode</button>
+      <button class="warning" onclick="clearPreparedCall()">Clear Prepared Call</button>
+    </div>
+
+    <input id="contactsFile" type="file" accept=".json,application/json" style="display:none;" />
+
+    <div class="pill-row">
+      <div id="voicePill" class="pill orange">Voice: OFF</div>
+      <div id="micPill" class="pill">Mic: Idle</div>
+      <div id="contactsPill" class="pill orange">Contacts: Not Loaded</div>
+      <div class="pill">Version: V8 Fast Fallback</div>
+    </div>
+
+    <div class="box call-panel">
+      <div class="label">Prepared Call</div>
+      <div id="preparedState" class="value muted">Say a name like <b>Call Raju</b>. The matched person will appear here with one large call button.</div>
+      <div id="preparedDetails" style="display:none;">
+        <div id="preparedName" class="call-name"></div>
+        <div id="preparedEmail" class="call-email"></div>
+        <a id="callNowBtn" class="big-action" href="#" target="_self" rel="noopener noreferrer">Call in Teams</a>
+        <div class="hint">Tip: after each call, just say the next name and press the large green button.</div>
+      </div>
+    </div>
+
+    <div class="box">
+      <div class="label">Contacts</div>
+      <div id="contactsSummary" class="value muted">No contacts loaded yet. Use Load Contacts File.</div>
+    </div>
+
+    <div class="box">
+      <div class="label">Status</div>
+      <div id="status" class="value">Ready</div>
+    </div>
+
+    <div class="box">
+      <div class="label">Last Heard</div>
+      <div id="lastHeard" class="value">Nothing yet</div>
+    </div>
+
+    <div class="box">
+      <div class="label">Manual Test</div>
+      <input id="command" type="text" placeholder='Type: Call Nick' />
+      <div style="margin-top:10px;">
+        <button class="primary" onclick="runManualCommand()">Prepare Call</button>
+      </div>
+    </div>
+
+    <div class="box">
+      <div class="label">Last Match</div>
+      <div id="debugInfo" class="value">No match attempted yet.</div>
+    </div>
+  </div>
+
+  <script>
+    let people = [];
+    let recognition = null;
+    let voiceMode = false;
+    let listening = false;
+    let preparedPerson = null;
+    const CONTACTS_STORAGE_KEY = 'teamsVoiceDialerContacts';
+
+    function setStatus(text) { document.getElementById('status').innerText = text; }
+    function setLastHeard(text) { document.getElementById('lastHeard').innerText = text || 'Nothing yet'; }
+    function setDebug(text) { document.getElementById('debugInfo').innerText = text; }
+
+    function updatePills() {
+      document.getElementById('voicePill').innerText = 'Voice: ' + (voiceMode ? 'ON' : 'OFF');
+      document.getElementById('voicePill').className = 'pill ' + (voiceMode ? 'green' : 'orange');
+      document.getElementById('micPill').innerText = 'Mic: ' + (listening ? 'Listening' : 'Idle');
+      document.getElementById('micPill').className = 'pill ' + (listening ? 'green' : '');
+      document.getElementById('contactsPill').innerText = 'Contacts: ' + (people.length ? people.length + ' Loaded' : 'Not Loaded');
+      document.getElementById('contactsPill').className = 'pill ' + (people.length ? 'green' : 'orange');
+    }
+
+    function triggerContactsFile() { document.getElementById('contactsFile').click(); }
+    function normalizeEmail(value) { return String(value || '').trim().toLowerCase(); }
+    function isValidEmail(value) { return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value); }
+    function normalizeName(value) { return String(value || '').toLowerCase().trim().replace(/\s+/g, ' '); }
+
+    function validateContacts(data) {
+      if (!Array.isArray(data)) throw new Error('Contacts file must contain a JSON array.');
+      const cleaned = [];
+      const seen = new Set();
+      for (const item of data) {
+        if (!item || typeof item !== 'object') continue;
+        const name = String(item.name || '').trim();
+        const email = normalizeEmail(item.email || item.mail || item.upn || '');
+        if (!name || !email || !isValidEmail(email) || seen.has(email)) continue;
+        seen.add(email);
+        cleaned.push({ name, email, normalizedName: normalizeName(name) });
+      }
+      if (!cleaned.length) throw new Error('No valid contacts found. Each entry needs valid name and email.');
+      return cleaned;
+    }
+
+    function saveContactsLocally(contacts) {
+      localStorage.setItem(CONTACTS_STORAGE_KEY, JSON.stringify(contacts.map(p => ({ name: p.name, email: p.email }))));
+    }
+
+    function updateContactsSummary(sourceText) {
+      const el = document.getElementById('contactsSummary');
+      if (!people.length) {
+        el.innerText = 'No contacts loaded yet. Use Load Contacts File.';
+        return;
+      }
+      el.innerText = people.length + ' contacts loaded. ' + (sourceText || '');
+    }
+
+    function loadStoredContacts() {
+      try {
+        const raw = localStorage.getItem(CONTACTS_STORAGE_KEY);
+        if (!raw) return;
+        people = validateContacts(JSON.parse(raw));
+        updateContactsSummary("Loaded from this browser's local storage.");
+        setStatus('Loaded ' + people.length + ' contacts from local storage.');
+        updatePills();
+      } catch (e) {
+        people = [];
+        updateContactsSummary();
+        updatePills();
+      }
+    }
+
+    function clearStoredContacts() {
+      localStorage.removeItem(CONTACTS_STORAGE_KEY);
+      people = [];
+      clearPreparedCall();
+      setStatus('Stored contacts cleared from this browser.');
+      updateContactsSummary();
+      updatePills();
+    }
+
+    async function handleContactsFile(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        people = validateContacts(JSON.parse(text));
+        saveContactsLocally(people);
+        updateContactsSummary('Loaded from local file: ' + file.name);
+        setStatus('Loaded ' + people.length + ' contacts from ' + file.name + '.');
+        updatePills();
+      } catch (e) {
+        setStatus('Could not load contacts file: ' + e.message);
+      } finally {
+        event.target.value = '';
+      }
+    }
+
+    function normalizeCommand(text) {
+      return normalizeName(text)
+        .replace(/^please\s+/, '')
+        .replace(/^call\s+the\s+/, '')
+        .replace(/^call\s+to\s+/, '')
+        .replace(/^call\s+/, '')
+        .replace(/^dial\s+the\s+/, '')
+        .replace(/^dial\s+/, '')
+        .replace(/^make\s+a\s+call\s+to\s+/, '');
+    }
+
+    function scoreMatch(person, spoken) {
+      const name = person.normalizedName;
+      if (spoken === name) return 100;
+      if (name.startsWith(spoken)) return 86;
+      if (spoken.startsWith(name)) return 84;
+      if (name.includes(spoken)) return 78;
+      if (spoken.includes(name)) return 74;
+      const parts = spoken.split(' ').filter(Boolean);
+      let hits = 0;
+      for (const part of parts) if (name.includes(part)) hits += 1;
+      if (hits) return 44 + hits;
+      return 0;
+    }
+
+    function findBestMatch(rawText) {
+      const spoken = normalizeCommand(rawText);
+      if (!spoken) return { person: null, spoken };
+      let best = null;
+      let bestScore = 0;
+      let tie = false;
+      for (const person of people) {
+        const score = scoreMatch(person, spoken);
+        if (score > bestScore) {
+          best = person;
+          bestScore = score;
+          tie = false;
+        } else if (score > 0 && score === bestScore) {
+          tie = true;
+        }
+      }
+      if (bestScore < 74 || tie) return { person: null, spoken };
+      return { person: best, spoken };
+    }
+
+    function prepareCall(person, spokenText) {
+      preparedPerson = person;
+      const desktopUrl = 'msteams://teams.microsoft.com/l/call/0/0?users=' + encodeURIComponent(person.email);
+      document.getElementById('preparedName').innerText = person.name;
+      document.getElementById('preparedEmail').innerText = person.email;
+      const btn = document.getElementById('callNowBtn');
+      btn.href = desktopUrl;
+      btn.innerText = 'Call ' + person.name + ' in Teams';
+      document.getElementById('preparedState').style.display = 'none';
+      document.getElementById('preparedDetails').style.display = 'block';
+      setStatus('Prepared call for ' + person.name + '. Press the green button.');
+      setDebug('Spoken: ' + spokenText + '\nMatched: ' + person.name + '\nEmail: ' + person.email + '\nDesktop URL: ' + desktopUrl + '\nStatus: prepared for one-click launch');
+    }
+
+    function clearPreparedCall() {
+      preparedPerson = null;
+      document.getElementById('preparedState').style.display = 'block';
+      document.getElementById('preparedDetails').style.display = 'none';
+      document.getElementById('preparedName').innerText = '';
+      document.getElementById('preparedEmail').innerText = '';
+      const btn = document.getElementById('callNowBtn');
+      btn.href = '#';
+      btn.innerText = 'Call in Teams';
+      document.getElementById('preparedState').innerHTML = 'Say a name like <b>Call Raju</b>. The matched person will appear here with one large call button.';
+    }
+
+    function processCommand(rawInput) {
+      if (!people.length) { setStatus('Please load a contacts file first.'); return; }
+      const text = String(rawInput || '').trim();
+      if (!text) { setStatus('Please say a name.'); return; }
+      setLastHeard(text);
+      const result = findBestMatch(text);
+      if (!result.person) {
+        setStatus('No single confident match found. Use a more specific name in the contacts list.');
+        setDebug('Spoken: ' + text + '\nStatus: no single confident match');
+        return;
+      }
+      prepareCall(result.person, text);
+    }
+
+    function runManualCommand() { processCommand(document.getElementById('command').value); }
+    function getSpeechSupport() { return window.SpeechRecognition || window.webkitSpeechRecognition || null; }
+
+    function createRecognition() {
+      const SpeechRecognition = getSpeechSupport();
+      if (!SpeechRecognition) { setStatus('Speech recognition is not supported in this browser.'); return null; }
+      const rec = new SpeechRecognition();
+      rec.lang = 'en-US';
+      rec.interimResults = false;
+      rec.continuous = false;
+      rec.maxAlternatives = 1;
+      rec.onstart = function () { listening = true; updatePills(); setStatus('Listening...'); };
+      rec.onresult = function (event) {
+        const spokenText = event.results[0][0].transcript || '';
+        document.getElementById('command').value = spokenText;
+        processCommand(spokenText);
+      };
+      rec.onerror = function (event) {
+        listening = false; updatePills();
+        let msg = 'Mic error: ' + event.error;
+        if (event.error === 'not-allowed') msg += '\nPlease allow microphone access.';
+        if (event.error === 'no-speech' && voiceMode) msg += '\nNo speech detected. Please try again.';
+        setStatus(msg);
+      };
+      rec.onend = function () { listening = false; updatePills(); };
+      return rec;
+    }
+
+    function beginListening() {
+      if (!voiceMode || listening || document.visibilityState !== 'visible') return;
+      recognition = createRecognition();
+      if (!recognition) return;
+      try { recognition.start(); } catch (_) { listening = false; updatePills(); setStatus('Could not start microphone.'); }
+    }
+
+    function startVoiceMode() {
+      if (!people.length) { setStatus('Please load a contacts file first.'); return; }
+      voiceMode = true; updatePills(); setStatus('Voice Mode started.'); beginListening();
+    }
+
+    function stopVoiceMode() {
+      voiceMode = false; listening = false;
+      if (recognition) { try { recognition.stop(); } catch (_) {} }
+      updatePills(); setStatus('Voice Mode stopped.');
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      document.getElementById('contactsFile').addEventListener('change', handleContactsFile);
+      document.getElementById('command').addEventListener('keydown', function (e) { if (e.key === 'Enter') runManualCommand(); });
+      loadStoredContacts(); updatePills();
+    });
+  </script>
+</body>
+</html>
